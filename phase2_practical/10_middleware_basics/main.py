@@ -18,19 +18,19 @@ from langchain_core.tools import tool
 from langchain.agents.middleware import AgentMiddleware
 from langgraph.checkpoint.memory import InMemorySaver
 
-# 加载环境变量
-load_dotenv()
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-
-if not GROQ_API_KEY or GROQ_API_KEY == "your_groq_api_key_here":
-    raise ValueError(
-        "\n请先在 .env 文件中设置有效的 GROQ_API_KEY\n"
-        "访问 https://console.groq.com/keys 获取免费密钥"
-    )
-
-# 初始化模型
-model = init_chat_model("groq:llama-3.3-70b-versatile", api_key=GROQ_API_KEY)
-
+# # 加载环境变量
+# load_dotenv()
+# GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+#
+# if not GROQ_API_KEY or GROQ_API_KEY == "your_groq_api_key_here":
+#     raise ValueError(
+#         "\n请先在 .env 文件中设置有效的 GROQ_API_KEY\n"
+#         "访问 https://console.groq.com/keys 获取免费密钥"
+#     )
+#
+# # 初始化模型
+# model = init_chat_model("groq:llama-3.3-70b-versatile", api_key=GROQ_API_KEY)
+from model_init import model
 
 
 @tool
@@ -460,7 +460,7 @@ def example_7_builtin_middleware():
         system_prompt="你是一个有帮助的助手。",
         middleware=[
             SummarizationMiddleware(
-                model="groq:llama-3.3-70b-versatile",
+                model=model,
                 max_tokens_before_summary=200  # 超过 200 token 就摘要
             )
         ],
@@ -498,17 +498,17 @@ def main():
     print("="*70)
 
     try:
-        # example_1_basic_middleware()
-        # input("\n按 Enter 继续...")
+        example_1_basic_middleware()
+        input("\n按 Enter 继续...")
 
-        # example_2_state_modification()
-        # input("\n按 Enter 继续...")
+        example_2_state_modification()
+        input("\n按 Enter 继续...")
 
-        # example_3_message_trimming()
-        # input("\n按 Enter 继续...")
+        example_3_message_trimming()
+        input("\n按 Enter 继续...")
 
-        # example_4_output_validation()
-        # input("\n按 Enter 继续...")
+        example_4_output_validation()
+        input("\n按 Enter 继续...")
 
         example_5_multiple_middleware()
         input("\n按 Enter 继续...")

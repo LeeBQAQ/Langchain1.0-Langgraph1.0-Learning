@@ -29,19 +29,19 @@ from langchain.chat_models import init_chat_model
 from langchain.agents import create_agent  # ✅ LangGraph 预构建 ReAct Agent
 from calculator import calculator
 from weather import get_weather
-
-# 加载环境变量
-load_dotenv()
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-
-if not GROQ_API_KEY or GROQ_API_KEY == "your_groq_api_key_here":
-    raise ValueError(
-        "\n请先在 .env 文件中设置有效的 GROQ_API_KEY\n"
-        "访问 https://console.groq.com/keys 获取免费密钥"
-    )
-
-# 初始化模型
-model = init_chat_model("groq:llama-3.3-70b-versatile", api_key=GROQ_API_KEY)
+from model_init import model
+# # 加载环境变量
+# load_dotenv()
+# GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+#
+# if not GROQ_API_KEY or GROQ_API_KEY == "your_groq_api_key_here":
+#     raise ValueError(
+#         "\n请先在 .env 文件中设置有效的 GROQ_API_KEY\n"
+#         "访问 https://console.groq.com/keys 获取免费密钥"
+#     )
+#
+# # 初始化模型
+# model = init_chat_model("groq:llama-3.3-70b-versatile", api_key=GROQ_API_KEY)
 
 
 
@@ -119,23 +119,49 @@ def example_2_streaming():
     system_prompt="你是一个有帮助的助手。"
     )
 
-    print("\n问题：北京天气如何？然后计算 10 加 20")
+    print("\n问题：北京天气如何？")
     print("\n流式输出（实时显示）：")
     print("-" * 70)
 
+    # # 使用 stream 方法
+    # for chunk in agent.stream({
+    #     "messages": [{"role": "user", "content": "北京天气如何？"}]
+    # }):
+    #     # chunk 是字典，包含更新的状态
+    #     if 'messages' in chunk:
+    #         # 获取最新的消息
+    #         latest_msg = chunk['messages'][-1]
+    #
+    #         # 如果是 AI 的最终回答
+    #         if hasattr(latest_msg, 'content') and latest_msg.content:
+    #             if not hasattr(latest_msg, 'tool_calls') or not latest_msg.tool_calls:
+    #                 print(f"\n最终回答: {latest_msg.content}")
+    full_messages = []
     # 使用 stream 方法
     for chunk in agent.stream({
         "messages": [{"role": "user", "content": "北京天气如何？"}]
     }):
-        # chunk 是字典，包含更新的状态
-        if 'messages' in chunk:
-            # 获取最新的消息
-            latest_msg = chunk['messages'][-1]
+        # chunk 是字典，例如: {'messages': [AIMessageChunk(...)]}
+        if 'model' in chunk:
+            # 【修正点 2】：从 'model' 节点的数据中获取 'messages'
+            node_data = chunk['model']
 
-            # 如果是 AI 的最终回答
-            if hasattr(latest_msg, 'content') and latest_msg.content:
-                if not hasattr(latest_msg, 'tool_calls') or not latest_msg.tool_calls:
-                    print(f"\n最终回答: {latest_msg.content}")
+            if 'messages' in node_data:
+                messages = node_data['messages']
+                if messages:
+                    latest_msg = messages[-1]
+
+                    # 【修正点 3】：打印内容
+                    # 注意：在 stream_mode='updates' 下，这里拿到的通常是完整的 AIMessage
+                    # 如果模型支持流式 token，可能需要配合 stream_mode='messages' 才能看到逐字效果
+                    # 但基于你当前的结构，我们先把它打印出来
+                    if hasattr(latest_msg, 'content') and latest_msg.content:
+                        # 如果是流式片段，content 可能是增量；如果是完整消息，则是全文
+                        print(latest_msg.content, end='', flush=True)
+
+                    # 可选：打印工具调用信息，方便调试
+                    if hasattr(latest_msg, 'tool_calls') and latest_msg.tool_calls:
+                        print(f"\n[工具调用: {latest_msg.tool_calls}]", end='', flush=True)
 
     print("\n关键点：")
     print("  - stream() 返回生成器，逐步返回结果")
@@ -394,4 +420,6 @@ def main():
         traceback.print_exc()
 
 if __name__ == "__main__":
-    main()
+    # main()
+    # example_2_streaming()
+    example_6_best_practices()

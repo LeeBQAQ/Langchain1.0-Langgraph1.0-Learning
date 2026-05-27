@@ -15,6 +15,7 @@ LangChain 1.0 - Structured Output (结构化输出)
 """
 
 import os
+import sys
 import json
 from dotenv import load_dotenv
 from langchain.chat_models import init_chat_model
@@ -24,76 +25,132 @@ from typing import Optional, List, TypeVar, Type
 from enum import Enum
 
 # 加载环境变量
-load_dotenv()
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-
-if not GROQ_API_KEY or GROQ_API_KEY == "your_groq_api_key_here":
-    raise ValueError(
-        "\n请先在 .env 文件中设置有效的 GROQ_API_KEY\n"
-        "访问 https://console.groq.com/keys 获取免费密钥"
-    )
-
-# 初始化模型
-model = init_chat_model("groq:llama-3.3-70b-versatile", api_key=GROQ_API_KEY)
-
-
+# load_dotenv()
+# GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+#
+# if not GROQ_API_KEY or GROQ_API_KEY == "your_groq_api_key_here":
+#     raise ValueError(
+#         "\n请先在 .env 文件中设置有效的 GROQ_API_KEY\n"
+#         "访问 https://console.groq.com/keys 获取免费密钥"
+#     )
+#
+# # 初始化模型
+# # 支持 Groq、DeepSeek 等多种 provider
+# # 格式：init_chat_model("provider:model_name", api_key="...")
+from model_init import no_thinking_model
 # ==================== 辅助函数 ====================
-
+model = no_thinking_model
 T = TypeVar('T', bound=BaseModel)
 
-def safe_structured_output(prompt: str, output_class: Type[T]) -> T:
+
+def _schema_to_example(schema_props: dict, defs: dict | None = None) -> dict:
+    """将 JSON Schema properties 转为带类型占位符的示例 JSON
+
+    LLM 看到 {"name": "string", "age": 0} 时理解这是需要填值的模板，
+    而不是 JSON Schema 定义本身。
     """
-    安全的结构化输出函数
-    
-    先尝试 with_structured_output，失败则使用 JSON 解析 fallback
-    """
-    # 尝试使用 with_structured_output
-    try:
-        structured_llm = create_safe_structured_llm(output_class)
-        result = structured_llm.invoke(prompt)
-        return result
-    except Exception as e:
-        print(f"  ⚠️ with_structured_output 失败: {e}")
-        print("  📝 使用 JSON 解析 fallback...")
-    
-    # Fallback: 手动 JSON 解析
+    example = {}
+    for key, prop in schema_props.items():
+        actual_type = prop.get("type")
+        # Optional 字段：anyOf 中取非 null 的类型
+        if actual_type is None and "anyOf" in prop:
+            for option in prop["anyOf"]:
+                t = option.get("type")
+                if t and t != "null":
+                    actual_type = t
+                    break
+
+        # 解析 $ref 引用（嵌套模型、枚举等）
+        ref = prop.get("$ref") or (prop.get("items", {}).get("$ref") if actual_type == "array" else None)
+        if ref and defs:
+            ref_name = ref.split("/")[-1]
+            if ref_name in defs:
+                resolved = defs[ref_name]
+                # 枚举类型：直接用第一个枚举值
+                if "enum" in resolved:
+                    example[key] = resolved["enum"][0]
+                    continue
+                # 有 properties 的模型：递归解析
+                if resolved.get("properties"):
+                    if actual_type == "array":
+                        example[key] = [_schema_to_example(resolved["properties"], defs)]
+                    else:
+                        example[key] = _schema_to_example(resolved["properties"], defs)
+                    continue
+
+        if "enum" in prop:
+            example[key] = prop["enum"][0]
+        elif actual_type == "string":
+            example[key] = "string"
+        elif actual_type == "integer":
+            example[key] = 0
+        elif actual_type == "number":
+            example[key] = 0.0
+        elif actual_type == "boolean":
+            example[key] = False
+        elif actual_type == "array":
+            items = prop.get("items", {})
+            if items.get("type") == "object" and items.get("properties"):
+                example[key] = [_schema_to_example(items.get("properties", {}), defs)]
+            elif "enum" in items:
+                example[key] = [items["enum"][0]]
+            else:
+                example[key] = []
+        elif actual_type == "object":
+            example[key] = _schema_to_example(prop.get("properties", {}), defs)
+        else:
+            example[key] = "..."
+    return example
+
+
+def _json_fallback(prompt: str, output_class: Type[T]) -> T:
+    """JSON 解析回退——当 with_structured_output 失败时使用"""
+    schema = output_class.model_json_schema()
+    example = _schema_to_example(schema.get("properties", {}), schema.get("$defs", {}))
+
     json_prompt = f"""{prompt}
 
-请严格按照以下JSON格式返回（不要添加任何其他内容）：
-{json.dumps(output_class.model_json_schema().get('properties', {}), indent=2, ensure_ascii=False)}
+请返回一个JSON对象，格式参照以下示例（把占位符替换为真实数据）：
+
+{json.dumps(example, indent=2, ensure_ascii=False)}
 
 只返回JSON，不要其他文字。"""
-    
+
     response = model.invoke([HumanMessage(content=json_prompt)])
     content = response.content.strip()
-    
-    # 清理 Markdown 格式
+
     if "```json" in content:
         content = content.split("```json")[1].split("```")[0]
     elif "```" in content:
         content = content.split("```")[1].split("```")[0]
-    
-    try:
-        data = json.loads(content.strip())
-        return output_class.model_validate(data)
-    except Exception as e2:
-        print(f"  ❌ JSON 解析也失败: {e2}")
-        raise ValueError(f"无法解析结构化输出: {e2}")
 
+    data = json.loads(content.strip())
+    return output_class.model_validate(data)
 
 
 def create_safe_structured_llm(output_class):
-    """创建带 fallback 的结构化输出 LLM"""
-    base_llm = model.with_structured_output(output_class)
-    
+    """创建带 fallback 的结构化输出 LLM
+
+    先尝试 with_structured_output (method=function_calling)，
+    DeepSeek Thinking 模式不支持 tool_choice 时会自动回退到
+    JSON 文本解析。
+    """
+
     class SafeStructuredLLM:
         def invoke(self, prompt):
             try:
-                return base_llm.invoke(prompt)
+                llm = model.with_structured_output(output_class,  method="function_calling")
+                return llm.invoke(prompt)
             except Exception as e:
-                print(f"  ⚠️ 结构化输出失败，使用 fallback: {e}")
-                return safe_structured_output(prompt, output_class)
-    
+                print(f"  [WARN] with_structured_output 失败: {e}")
+
+            print("  [FALLBACK] 使用 JSON 文本 fallback...")
+            try:
+                return _json_fallback(prompt, output_class)
+            except Exception as e2:
+                print(f"  [ERROR] JSON 解析也失败: {e2}")
+                raise ValueError(f"无法解析结构化输出: {e2}")
+
     return SafeStructuredLLM()
 
 
@@ -118,8 +175,9 @@ def example_1_basic_structured_output():
 
     print("\n提示: 张三是一名 30 岁的软件工程师")
     
-    # 使用安全的结构化输出函数
-    result = safe_structured_output("张三是一名 30 岁的软件工程师", Person)
+    # 使用安全的结构化输出
+    structured_llm = create_safe_structured_llm(Person)
+    result = structured_llm.invoke("张三是一名 30 岁的软件工程师")
 
     print(f"\n返回类型: {type(result)}")
     print(f"姓名: {result.name}")

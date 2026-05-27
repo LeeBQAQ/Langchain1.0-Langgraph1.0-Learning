@@ -25,13 +25,14 @@ from langchain.chat_models import init_chat_model
 from langchain_core.tools import tool
 
 # 导入自定义工具
-from weather import get_weather
-from calculator import calculator
-from web_search import web_search
+from tools.weather import get_weather
+from tools.calculator import calculator
+from tools.web_search import web_search
 
 # 加载环境变量
 load_dotenv()
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+MODEL = os.getenv("model")
 
 if not GROQ_API_KEY or GROQ_API_KEY == "your_groq_api_key_here":
     raise ValueError(
@@ -40,7 +41,7 @@ if not GROQ_API_KEY or GROQ_API_KEY == "your_groq_api_key_here":
     )
 
 # 初始化模型
-model = init_chat_model("groq:llama-3.3-70b-versatile", api_key=GROQ_API_KEY)
+model = init_chat_model(model=MODEL, api_key=GROQ_API_KEY)
 
 
 
