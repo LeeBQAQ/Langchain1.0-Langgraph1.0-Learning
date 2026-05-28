@@ -11,20 +11,21 @@ import time
 from typing import Optional, List
 from dotenv import load_dotenv
 from langchain.chat_models import init_chat_model
-from langchain.agents import create_agent  # LangChain 1.0 统一 API
-
+from langchain.agents import create_agent
+# LangChain 1.0 统一 API
+from model_init import model
 # 加载环境变量
-load_dotenv()
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-
-if not GROQ_API_KEY or GROQ_API_KEY == "your_groq_api_key_here":
-    raise ValueError(
-        "\n请先在 .env 文件中设置有效的 GROQ_API_KEY\n"
-        "访问 https://console.groq.com/keys 获取免费密钥"
-    )
-
-# 初始化模型
-model = init_chat_model("groq:llama-3.3-70b-versatile", api_key=GROQ_API_KEY)
+# load_dotenv()
+# GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+#
+# if not GROQ_API_KEY or GROQ_API_KEY == "your_groq_api_key_here":
+#     raise ValueError(
+#         "\n请先在 .env 文件中设置有效的 GROQ_API_KEY\n"
+#         "访问 https://console.groq.com/keys 获取免费密钥"
+#     )
+#
+# # 初始化模型
+# model = init_chat_model("groq:llama-3.3-70b-versatile", api_key=GROQ_API_KEY)
 
 # ============================================================
 # 示例 1: 高级工具定义与参数验证
@@ -39,7 +40,7 @@ def example_1_advanced_tools():
     print("=" * 60)
     
     from langchain_core.tools import tool, StructuredTool
-    from pydantic import BaseModel, Field, validator
+    from pydantic import BaseModel, Field, field_validator
     
     # 方式1: 简单 @tool 装饰器
     @tool
@@ -65,7 +66,8 @@ def example_1_advanced_tools():
         city: str = Field(description="城市名称")
         unit: str = Field(default="celsius", description="温度单位: celsius 或 fahrenheit")
         
-        @validator("unit")
+        @field_validator("unit")
+        @classmethod
         def validate_unit(cls, v):
             if v not in ["celsius", "fahrenheit"]:
                 raise ValueError("unit 必须是 'celsius' 或 'fahrenheit'")
@@ -133,36 +135,43 @@ def example_2_error_handling():
     print("=" * 60)
     
     from langchain_core.tools import tool, ToolException
-    
-    # 基本错误处理
-    @tool(handle_tool_error=True)
+
+    # 基本错误处理：捕获 ToolException 并返回错误消息
+    @tool
     def safe_divide(a: float, b: float) -> str:
         """安全的除法运算。
-        
+
         Args:
             a: 被除数
             b: 除数
         """
-        if b == 0:
-            raise ToolException("除数不能为零！请提供一个非零的除数。")
-        return f"{a} ÷ {b} = {a / b:.4f}"
-    
-    # 自定义错误处理
+        try:
+            if b == 0:
+                raise ToolException("除数不能为零！请提供一个非零的除数。")
+            return f"{a} ÷ {b} = {a / b:.4f}"
+        except ToolException as e:
+            return str(e)
+
+    # 自定义错误处理函数
     def custom_error_handler(error: ToolException) -> str:
         return f"⚠️ 操作失败: {error.args[0]}\n💡 建议: 请检查输入参数是否正确。"
-    
-    @tool(handle_tool_error=custom_error_handler)
+
+    # 自定义错误处理：使用 custom_error_handler 处理 ToolException
+    @tool
     def fetch_data(url: str) -> str:
         """从 URL 获取数据（模拟）。
-        
+
         Args:
             url: 要获取数据的 URL
         """
-        if not url.startswith("http"):
-            raise ToolException("URL 必须以 http:// 或 https:// 开头")
-        if "error" in url:
-            raise ToolException("无法连接到服务器")
-        return f"成功获取数据: {url}"
+        try:
+            if not url.startswith("http"):
+                raise ToolException("URL 必须以 http:// 或 https:// 开头")
+            if "error" in url:
+                raise ToolException("无法连接到服务器")
+            return f"成功获取数据: {url}"
+        except ToolException as e:
+            return custom_error_handler(e)
     
     # 带重试的工具
     @tool
@@ -226,36 +235,52 @@ def example_3_monitoring():
             self._start_time = None
         
         def on_tool_start(
-            self, 
-            serialized: Dict[str, Any], 
-            input_str: str, 
+            self,
+            serialized: Dict[str, Any],
+            input_str: str,
             **kwargs
         ) -> None:
             self._start_time = time.time()
-            tool_name = serialized.get("name", "unknown")
-            print(f"  🔧 工具开始: {tool_name}")
+            self._current_tool = serialized.get("name", "unknown")
+            print(f"  🔧 工具开始: {self._current_tool}")
             print(f"     输入: {input_str[:100]}...")
-            
-            if tool_name not in self.tool_stats:
-                self.tool_stats[tool_name] = {"calls": 0, "duration": 0.0}
-        
+
+            if self._current_tool not in self.tool_stats:
+                self.tool_stats[self._current_tool] = {"calls": 0, "duration": 0.0}
+
         def on_tool_end(self, output: str, **kwargs) -> None:
             duration = time.time() - self._start_time
             self.call_count += 1
             self.total_duration += duration
-            
+
+            # 更新按工具统计
+            tool_name = getattr(self, "_current_tool", "unknown")
+            if tool_name in self.tool_stats:
+                self.tool_stats[tool_name]["calls"] += 1
+                self.tool_stats[tool_name]["duration"] += duration
+
             print(f"  ✅ 工具完成 (耗时: {duration:.3f}s)")
             print(f"     输出: {str(output)[:100]}...")
-        
+
         def on_tool_error(self, error: Exception, **kwargs) -> None:
-            print(f"  ❌ 工具错误: {error}")
+            tool_name = getattr(self, "_current_tool", "unknown")
+            if tool_name in self.tool_stats:
+                self.tool_stats[tool_name]["calls"] += 1
+            print(f"  ❌ 工具错误 [{tool_name}]: {error}")
         
         def get_stats(self) -> dict:
             """获取统计信息"""
             return {
                 "total_calls": self.call_count,
                 "total_duration": f"{self.total_duration:.3f}s",
-                "avg_duration": f"{self.total_duration/max(1, self.call_count):.3f}s"
+                "avg_duration": f"{self.total_duration/max(1, self.call_count):.3f}s",
+                "per_tool": {
+                    name: {
+                        "calls": s["calls"],
+                        "duration": f"{s['duration']:.3f}s"
+                    }
+                    for name, s in self.tool_stats.items()
+                }
             }
     
     # 创建监控器
@@ -365,13 +390,11 @@ def example_4_tool_composition():
     # 工厂函数：创建特定类型的搜索工具
     def create_category_search(category: str):
         """创建特定分类的搜索工具"""
-        @tool
+        @tool(f"search_{category.lower()}", description=f"在{category}分类中搜索相关商品")
         def category_search(query: str) -> str:
-            f"""在 {category} 分类中搜索商品。"""
+            """在指定分类中搜索商品。"""
             return f"[{category}] 搜索 '{query}' 的结果..."
-        
-        category_search.name = f"search_{category.lower()}"
-        category_search.description = f"在{category}分类中搜索相关商品"
+
         return category_search
     
     # 创建多个分类搜索工具
@@ -393,6 +416,11 @@ def example_4_tool_composition():
     print("\n📌 工厂创建的工具:")
     print(f"  - {electronics_search.name}: {electronics_search.description}")
     print(f"  - {clothing_search.name}: {clothing_search.description}")
+
+    # 实际调用验证工厂产出的工具可用
+    print("\n📌 调用工厂创建的工具:")
+    print(f"  {electronics_search.name}: {electronics_search.invoke({'query': '手机'})}")
+    print(f"  {clothing_search.name}: {clothing_search.invoke({'query': 'T恤'})}")
 
 # ============================================================
 # 示例 5: 完整的智能体示例（需要 API Key）
@@ -492,11 +520,11 @@ def example_5_complete_agent():
     
     # ====== 创建智能体 ======
     
-    # 确定使用哪个模型
-    if os.getenv("DEEPSEEK_API_KEY"):
-        model = init_chat_model("deepseek-chat", model_provider="deepseek")
-    else:
-        model = init_chat_model("gpt-3.5-turbo", model_provider="openai")
+    # # 确定使用哪个模型
+    # if os.getenv("DEEPSEEK_API_KEY"):
+    #     model = init_chat_model("deepseek-chat", model_provider="deepseek")
+    # else:
+    #     model = init_chat_model("gpt-3.5-turbo", model_provider="openai")
     
     tools = [check_order, get_faq, calculate_shipping]
     memory = MemorySaver()
