@@ -6,7 +6,7 @@ LangChain 1.0 - RAG Basics (RAG 基础)
 1. 文档加载 (Document Loaders)
 2. 文本分割 (Text Splitters)
 3. 向量嵌入 (Embeddings)
-4. 向量存储 (Vector Stores) - Pinecone 免费版
+4. 向量存储 (Vector Stores) - Milvus 本地版
 5. 检索 (Retrieval)
 6. RAG 问答链
 """
@@ -14,14 +14,19 @@ LangChain 1.0 - RAG Basics (RAG 基础)
 import os
 from pathlib import Path
 from dotenv import load_dotenv
+
+load_dotenv()
+
+# 国内用户自动使用 HuggingFace 镜像，必须在导入 langchain_huggingface 之前设置
+if not os.getenv("HF_ENDPOINT"):
+    os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
+
 from langchain.chat_models import init_chat_model
 from langchain_community.document_loaders import TextLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_huggingface import HuggingFaceEmbeddings
-from langchain_pinecone import PineconeVectorStore
 from langchain_core.tools import tool
-from pinecone import Pinecone, ServerlessSpec
-import time
+from pymilvus import MilvusClient
 
 # 获取脚本所在目录
 SCRIPT_DIR = Path(__file__).parent
@@ -31,28 +36,24 @@ DATA_DIR = SCRIPT_DIR / "data"
 DATA_DIR.mkdir(exist_ok=True)
 
 # 加载环境变量
-load_dotenv()
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-
-if not GROQ_API_KEY or GROQ_API_KEY == "your_groq_api_key_here":
-    raise ValueError(
-        "\n请先在 .env 文件中设置有效的 GROQ_API_KEY\n"
-        "访问 https://console.groq.com/keys 获取免费密钥"
-    )
-
-# 初始化模型
-model = init_chat_model("groq:llama-3.3-70b-versatile", api_key=GROQ_API_KEY)
-
-PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
+# load_dotenv()
+# GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+#
+# if not GROQ_API_KEY or GROQ_API_KEY == "your_groq_api_key_here":
+#     raise ValueError(
+#         "\n请先在 .env 文件中设置有效的 GROQ_API_KEY\n"
+#         "访问 https://console.groq.com/keys 获取免费密钥"
+#     )
+#
+# # 初始化模型
+# model = init_chat_model("groq:llama-3.3-70b-versatile", api_key=GROQ_API_KEY)
 
 
-if not PINECONE_API_KEY or PINECONE_API_KEY == "your_pinecone_api_key_here":
-    print("\n[警告] 未设置 PINECONE_API_KEY")
-    print("如需运行 Pinecone 相关示例，请：")
-    print("1. 访问 https://www.pinecone.io/ 注册免费账号")
-    print("2. 获取 API Key")
-    print("3. 在 .env 文件中设置 PINECONE_API_KEY=你的key")
-    print("\n当前将跳过需要 Pinecone 的示例\n")
+from model_init import model
+
+# Milvus 连接配置（本地）
+MILVUS_URI = os.getenv("MILVUS_URI", "http://localhost:19530")
+MILVUS_COLLECTION = "langchain_rag_demo"
 
 
 # ============================================================================
@@ -132,7 +133,7 @@ def example_2_text_splitters(documents):
     # 创建分割器
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=200,        # 每块最大字符数
-        chunk_overlap=50,      # 块之间的重叠字符数
+        chunk_overlap=50,      # 块之间的重叠字符数,保证文本语义连贯性
         length_function=len,   # 计算长度的函数
         separators=["\n\n", "\n", "。", "！", "？", " ", ""]  # 分割优先级
     )
@@ -183,7 +184,7 @@ def example_3_embeddings():
 
     # 创建嵌入模型（使用免费的 HuggingFace 模型）
     embeddings = HuggingFaceEmbeddings(
-        model_name="sentence-transformers/all-MiniLM-L6-v2"
+        model_name="sentence-transformers/all-MiniLM-L6-v2",
     )
 
     # 嵌入单个文本
@@ -231,125 +232,180 @@ def example_3_embeddings():
     return embeddings
 
 # ============================================================================
-# 示例 4：Pinecone 向量存储 - 创建索引
+# 示例 4：Milvus 向量存储 - 连接设置
 # ============================================================================
-def example_4_pinecone_setup():
+def example_4_milvus_setup(embeddings):
     """
-    示例4：Pinecone 设置
+    示例4：Milvus 设置
 
-    创建 Pinecone serverless 索引（免费层级）
+    连接本地 Milvus 向量数据库（使用新版 MilvusClient API）
     """
     print("\n" + "="*70)
-    print("示例 4：Pinecone 向量存储 - 创建索引")
+    print("示例 4：Milvus 向量存储 - 连接设置")
     print("="*70)
 
-    if not PINECONE_API_KEY or PINECONE_API_KEY == "your_pinecone_api_key_here":
-        print("\n[警告] 跳过：需要设置 PINECONE_API_KEY")
-        return None, None
+    print(f"\n连接配置:")
+    print(f"  URI: {MILVUS_URI}")
+    print(f"  集合名称: {MILVUS_COLLECTION}")
+    print(f"  存储类型: 本地部署（免费）")
 
-    # 初始化 Pinecone
-    pc = Pinecone(api_key=PINECONE_API_KEY)
+    try:
+        # 使用新版 MilvusClient API（无需 connections.connect）
+        client = MilvusClient(uri=MILVUS_URI)
 
-    # 索引配置
-    index_name = "langchain-rag-demo"
-    dimension = 384  # 与 all-MiniLM-L6-v2 模型维度匹配
+        # 检查集合是否存在
+        if client.has_collection(MILVUS_COLLECTION):
+            print(f"\n[OK] 集合 '{MILVUS_COLLECTION}' 已存在")
+            stats = client.get_collection_stats(MILVUS_COLLECTION)
+            print(f"  实体数: {stats.get('row_count', 'N/A')}")
+        else:
+            print(f"\n集合 '{MILVUS_COLLECTION}' 尚未创建，将在索引文档时创建")
 
-    print(f"\n索引配置:")
-    print(f"  名称: {index_name}")
-    print(f"  维度: {dimension}")
-    print(f"  类型: Serverless (免费层级)")
-    print(f"  区域: us-east-1 (AWS)")
+        print(f"\n[OK] Milvus 连接正常")
 
-    # 检查索引是否存在
-    existing_indexes = [idx.name for idx in pc.list_indexes()]
-
-    if index_name in existing_indexes:
-        print(f"\n[OK] 索引已存在，直接使用")
-        index = pc.Index(index_name)
-    else:
-        print(f"\n创建新索引...")
-        pc.create_index(
-            name=index_name,
-            dimension=dimension,
-            metric="cosine",  # 相似度度量
-            spec=ServerlessSpec(
-                cloud="aws",
-                region="us-east-1"  # 免费层级可用区域
-            )
-        )
-
-        # 等待索引就绪
-        print("等待索引初始化...")
-        time.sleep(10)
-        index = pc.Index(index_name)
-        print("[OK] 索引创建完成")
-
-    # 获取索引统计
-    stats = index.describe_index_stats()
-    print(f"\n索引统计:")
-    print(f"  向量数: {stats.get('total_vector_count', 0)}")
-    print(f"  维度: {stats.get('dimension', 'N/A')}")
+    except Exception as e:
+        print(f"\n[警告] 无法连接 Milvus: {e}")
+        print("请确保 Milvus 服务已启动：")
+        print("  docker run -d --name milvus-standalone \\")
+        print("    -p 19530:19530 -p 9091:9091 \\")
+        print("    milvusdb/milvus:latest standalone")
 
     print("\n关键点:")
-    print("  - Pinecone 提供免费 serverless 层级")
-    print("  - dimension 必须与 embedding 模型匹配")
-    print("  - metric='cosine' 用于相似度计算")
-    print("  - ServerlessSpec 配置云和区域")
+    print("  - Milvus 是开源向量数据库")
+    print("  - 使用新版 MilvusClient API（pymilvus 2.6+）")
+    print("  - 无需 ORM 连接，直接调用即可")
 
-    # 创建 embeddings
-    embeddings = HuggingFaceEmbeddings(
-        model_name="sentence-transformers/all-MiniLM-L6-v2"
-    )
+    return embeddings
 
-    return index_name, embeddings
+# ============================================================================
+# 简单的 Milvus 向量存储包装器（替代 langchain-milvus 的 Milvus 类）
+# ============================================================================
+class SimpleMilvusStore:
+    """
+    基于新版 MilvusClient API 的向量存储包装器
+
+    为什么不用 langchain-milvus？
+      pymilvus 2.5+ 的 MilvusClient 不再注册 ORM 连接，
+      而 langchain-milvus 内部仍使用 ORM Collection API，导致连接失败。
+      这里直接用 MilvusClient 新 API，更简洁且无需连接管理。
+    """
+
+    def __init__(self, client: MilvusClient, collection_name: str, embeddings):
+        self.client = client
+        self.collection_name = collection_name
+        self.embeddings = embeddings
+
+    def similarity_search(self, query: str, k: int = 3) -> list:
+        """相似度搜索，返回 Document 列表"""
+        from langchain_core.documents import Document
+
+        query_vector = self.embeddings.embed_query(query)
+        results = self.client.search(
+            collection_name=self.collection_name,
+            data=[query_vector],
+            limit=k,
+            output_fields=["text"],
+        )
+        docs = []
+        for hit_list in results:
+            for hit in hit_list:
+                entity = hit.get("entity", {})
+                docs.append(Document(
+                    page_content=entity.get("text", ""),
+                    metadata={"score": hit.get("distance", 0)},
+                ))
+        return docs
+
+    def as_retriever(self, k: int = 3):
+        """返回一个 retriever 函数，兼容 Agent 工具使用"""
+        def retriever(query: str) -> str:
+            docs = self.similarity_search(query, k=k)
+            return "\n\n".join([doc.page_content for doc in docs])
+        return retriever
+
 
 # ============================================================================
 # 示例 5：文档索引 - 存入向量数据库
 # ============================================================================
-def example_5_index_documents(index_name, embeddings, chunks):
+def example_5_index_documents(embeddings, chunks):
     """
     示例5：文档索引
 
-    将分割后的文档存入 Pinecone
+    使用 MilvusClient 新 API 将分割后的文档存入 Milvus
     """
     print("\n" + "="*70)
     print("示例 5：文档索引 - 存入向量数据库")
     print("="*70)
 
-    if not index_name or not embeddings:
-        print("\n[警告] 跳过：需要 Pinecone 配置")
-        return None
-
     print(f"\n准备索引 {len(chunks)} 个文档块...")
 
-    # 使用 PineconeVectorStore.from_documents()
-    vectorstore = PineconeVectorStore.from_documents(
-        documents=chunks,
-        embedding=embeddings,
-        index_name=index_name
-    )
+    try:
+        client = MilvusClient(uri=MILVUS_URI)
 
-    print(f"[OK] 文档已索引到 Pinecone")
+        # 如果集合已存在则删除重建
+        if client.has_collection(MILVUS_COLLECTION):
+            client.drop_collection(MILVUS_COLLECTION)
+            print(f"  已删除旧集合 '{MILVUS_COLLECTION}'")
 
-    # 测试检索
-    query = "LangChain 的核心组件是什么？"
-    print(f"\n测试检索:")
-    print(f"  查询: {query}")
+        # 计算所有文档块的嵌入向量
+        texts = [chunk.page_content for chunk in chunks]
+        print(f"  正在计算 {len(texts)} 个文本的嵌入向量...")
+        vectors = embeddings.embed_documents(texts)
+        dim = len(vectors[0])
+        print(f"  向量维度: {dim}")
 
-    results = vectorstore.similarity_search(query, k=2)
+        # 创建集合（新版 quick setup 模式）
+        client.create_collection(
+            collection_name=MILVUS_COLLECTION,
+            dimension=dim,
+            primary_field_name="id",
+            id_type="string",
+            vector_field_name="vector",
+            metric_type="COSINE",
+            auto_id=False,
+            max_length=65535,
+        )
+        print(f"  [OK] 集合 '{MILVUS_COLLECTION}' 已创建")
 
-    print(f"  返回 {len(results)} 个最相关的文档块:\n")
-    for i, doc in enumerate(results, 1):
-        print(f"  结果 {i}:")
-        print(f"    内容: {doc.page_content[:100]}...")
-        print()
+        # 插入数据
+        data = [
+            {"id": str(i), "vector": vec, "text": texts[i]}
+            for i, vec in enumerate(vectors)
+        ]
+        client.insert(collection_name=MILVUS_COLLECTION, data=data)
+        print(f"  [OK] 已插入 {len(data)} 条数据")
 
-    print("关键点:")
-    print("  - from_documents() 自动嵌入并存储")
-    print("  - similarity_search() 检索相似文档")
-    print("  - k=2 返回最相关的 2 个结果")
+        # 包装成向量存储
+        vectorstore = SimpleMilvusStore(client, MILVUS_COLLECTION, embeddings)
+        print(f"[OK] 文档已索引到 Milvus")
 
-    return vectorstore
+        # 测试检索
+        query = "LangChain 的核心组件是什么？"
+        print(f"\n测试检索:")
+        print(f"  查询: {query}")
+
+        results = vectorstore.similarity_search(query, k=2)
+
+        print(f"  返回 {len(results)} 个最相关的文档块:\n")
+        for i, doc in enumerate(results, 1):
+            print(f"  结果 {i} (相似度: {doc.metadata.get('score', 'N/A'):.4f}):")
+            print(f"    内容: {doc.page_content[:100]}...")
+            print()
+
+        print("关键点:")
+        print("  - 使用 MilvusClient 新 API，无需 connections.connect")
+        print("  - create_collection() 创建集合")
+        print("  - insert() 插入嵌入向量和文本")
+        print("  - search() 执行相似度搜索")
+
+        return vectorstore
+
+    except Exception as e:
+        print(f"\n[错误] 索引失败: {e}")
+        print("请确保 Milvus 服务正在运行")
+        import traceback
+        traceback.print_exc()
+        return None
 
 # ============================================================================
 # 示例 6：RAG 问答 - 使用检索工具
@@ -365,7 +421,7 @@ def example_6_rag_qa(vectorstore):
     print("="*70)
 
     if not vectorstore:
-        print("\n[警告] 跳过：需要 Pinecone vectorstore")
+        print("\n[警告] 跳过：需要 Milvus vectorstore")
         return
 
     # 创建检索工具
@@ -429,16 +485,16 @@ def main():
         chunks = example_2_text_splitters(documents)
         input("\n按 Enter 继续...")
 
-        # 3. 向量嵌入
+        # 3. 向量嵌入（只加载一次，后续复用）
         embeddings = example_3_embeddings()
         input("\n按 Enter 继续...")
 
-        # 4. Pinecone 设置
-        index_name, embeddings = example_4_pinecone_setup()
+        # 4. Milvus 设置
+        example_4_milvus_setup(embeddings)
         input("\n按 Enter 继续...")
 
         # 5. 文档索引
-        vectorstore = example_5_index_documents(index_name, embeddings, chunks)
+        vectorstore = example_5_index_documents(embeddings, chunks)
         input("\n按 Enter 继续...")
 
         # 6. RAG 问答
@@ -451,7 +507,7 @@ def main():
         print("  1. Document Loaders - 加载文档")
         print("  2. Text Splitters - 分割文本")
         print("  3. Embeddings - 向量嵌入")
-        print("  4. Vector Stores - 向量存储（Pinecone）")
+        print("  4. Vector Stores - 向量存储（Milvus 本地版）")
         print("  5. Similarity Search - 相似度检索")
         print("  6. RAG - 检索增强生成")
         print("\nRAG 工作流:")
@@ -459,6 +515,12 @@ def main():
         print("  查询 -> 检索 -> 提供给 LLM -> 生成答案")
         print("\n下一步：")
         print("  14_rag_advanced - RAG 进阶（混合搜索、重排序）")
+        print("\nMilvus 使用提示：")
+        print("  启动本地 Milvus:")
+        print("    docker run -d --name milvus-standalone \\")
+        print("      -p 19530:19530 -p 9091:9091 \\")
+        print("      milvusdb/milvus:latest standalone")
+        print("  使用新版 MilvusClient API（pymilvus 2.6+ 推荐）")
 
     except KeyboardInterrupt:
         print("\n\n程序中断")

@@ -4,7 +4,10 @@
       "Bash(rtk ls *)",
       "Bash(rtk find *)",
       "Bash(python *)",
-      "Bash(rtk grep *)"
+      "Bash(rtk grep *)",
+      "Bash(rtk pip *)",
+      "WebSearch",
+      "Bash(PYTHONPATH=. echo \"\")"
     ]
   }
 }
