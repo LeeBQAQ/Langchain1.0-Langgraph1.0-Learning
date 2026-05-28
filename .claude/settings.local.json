@@ -7,7 +7,12 @@
       "Bash(rtk grep *)",
       "Bash(rtk pip *)",
       "WebSearch",
-      "Bash(PYTHONPATH=. echo \"\")"
+      "Bash(PYTHONPATH=. echo \"\")",
+      "Bash(PYTHONPATH=\"D:/WorkSpace_Python/Langchain1.0-Langgraph1.0-Learning\" python phase2_practical/13_rag_basics/main.py)",
+      "Bash(python3 -c \"import huggingface_hub; print\\(huggingface_hub.__version__\\); print\\(huggingface_hub.constants.__file__\\)\")",
+      "Bash(pip show *)",
+      "Bash(D:/SoftWare/anaconda3/envs/hello_agent/python.exe -c \"import sentence_transformers; print\\(sentence_transformers.__version__\\)\")",
+      "Bash(D:/SoftWare/anaconda3/envs/hello_agent/python.exe *)"
     ]
   }
 }

@@ -5,6 +5,12 @@
 import os
 from pathlib import Path
 
+# 国内用户自动使用 HuggingFace 镜像
+# 必须在导入任何会触发 huggingface_hub 的库之前设置
+# 因为 huggingface_hub 在导入时读取 HF_ENDPOINT 并缓存为常量
+if not os.getenv("HF_ENDPOINT"):
+    os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
+
 # 获取脚本所在目录
 SCRIPT_DIR = Path(__file__).parent
 DATA_DIR = SCRIPT_DIR / "data"
