@@ -12,7 +12,9 @@
       "Bash(python3 -c \"import huggingface_hub; print\\(huggingface_hub.__version__\\); print\\(huggingface_hub.constants.__file__\\)\")",
       "Bash(pip show *)",
       "Bash(D:/SoftWare/anaconda3/envs/hello_agent/python.exe -c \"import sentence_transformers; print\\(sentence_transformers.__version__\\)\")",
-      "Bash(D:/SoftWare/anaconda3/envs/hello_agent/python.exe *)"
+      "Bash(D:/SoftWare/anaconda3/envs/hello_agent/python.exe *)",
+      "Bash(PYTHONPATH=\"D:/WorkSpace_Python/Langchain1.0-Langgraph1.0-Learning\" python phase3_advanced/17_multi_agent/practice.py)",
+      "Bash(PYTHONPATH=\"D:/WorkSpace_Python/Langchain1.0-Langgraph1.0-Learning\" PYTHONIOENCODING=utf-8 python phase3_advanced/17_multi_agent/practice.py)"
     ]
   }
 }
