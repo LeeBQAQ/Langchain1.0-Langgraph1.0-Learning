@@ -13,7 +13,8 @@ from pydantic import BaseModel, Field, ValidationError
 from langchain.chat_models import init_chat_model
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.runnables import RunnableLambda, RunnableConfig
-
+import json
+from model_init import model
 # ==================== JSON 解析辅助函数 ====================
 
 def safe_parse_json(text: str, default: dict = None) -> dict:
@@ -52,22 +53,6 @@ def safe_parse_json(text: str, default: dict = None) -> dict:
         print(f"   ⚠️ JSON 解析失败: {e}")
         return default
 
-
-
-# 加载环境变量
-load_dotenv()
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-
-if not GROQ_API_KEY or GROQ_API_KEY == "your_groq_api_key_here":
-    raise ValueError(
-        "\n请先在 .env 文件中设置有效的 GROQ_API_KEY\n"
-        "访问 https://console.groq.com/keys 获取免费密钥"
-    )
-
-# 初始化模型
-model = init_chat_model("groq:llama-3.3-70b-versatile", api_key=GROQ_API_KEY)
-
-    # 初始化模型
 
 # ============================================================
 # 示例 1：基本重试机制
